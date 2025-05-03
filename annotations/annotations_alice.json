@@ -1,0 +1,106 @@
+{
+  "A red car parked on the street": [
+    {
+      "img_path": "images/car_001.jpg",
+      "votes": [
+        "deepseek-vl",
+        "qwen-vl"
+      ],
+      "human_annotation": "Ambiguous"
+    },
+    {
+      "img_path": "images/car_002.jpg",
+      "votes": [
+        "llava"
+      ],
+      "human_annotation": "False"
+    },
+    {
+      "img_path": "images/car_003.jpeg",
+      "votes": [
+        "qwen-vl",
+        "bunny",
+        "llava"
+      ],
+      "human_annotation": "True"
+    },
+    {
+      "img_path": "images/not_a_car.jpg",
+      "votes": [
+        "bunny"
+      ],
+      "human_annotation": "False"
+    }
+  ],
+  "Dogs playing in a park": [
+    {
+      "img_path": "images/dogs_park_1.jpg",
+      "votes": [
+        "llava",
+        "deepseek-vl",
+        "qwen-vl"
+      ],
+      "human_annotation": null
+    },
+    {
+      "img_path": "images/dogs_park_2.jpg",
+      "votes": [
+        "qwen-vl"
+      ],
+      "human_annotation": null
+    },
+    {
+      "img_path": "images/cat_park_1.jpeg",
+      "votes": [
+        "deepseek-vl",
+        "bunny"
+      ],
+      "human_annotation": "False"
+    },
+    {
+      "img_path": "images/dogs_indoor_1.jpg",
+      "votes": [
+        "llava"
+      ],
+      "human_annotation": null
+    },
+    {
+      "img_path": "images/dogs_park_3.jpg",
+      "votes": [
+        "deepseek-vl",
+        "qwen-vl",
+        "llava",
+        "bunny"
+      ],
+      "human_annotation": "False"
+    }
+  ],
+  "Close-up of a delicious looking pizza": [
+    {
+      "img_path": "images/pizza_1.jpg",
+      "votes": [
+        "qwen-vl",
+        "llava",
+        "deepseek-vl",
+        "bunny"
+      ],
+      "human_annotation": "True"
+    },
+    {
+      "img_path": "images/pizza_2.jpg",
+      "votes": [
+        "qwen-vl",
+        "deepseek-vl"
+      ],
+      "human_annotation": "Ambiguous"
+    },
+    {
+      "img_path": "images/burger_1.jpg",
+      "votes": [
+        "bunny"
+      ],
+      "human_annotation": "False"
+    }
+  ],
+  "Empty caption with no images": []
+}

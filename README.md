@@ -13,7 +13,11 @@ This Streamlit application provides a web-based user interface for verifying ima
 *   **Filtering:**
     *   Filter images based on which MLLMs voted for them (multi-select).
     *   Filter images based on the *number* of MLLMs that voted (multi-select).
-*   **Annotation:** Assign "True", "False", or "Ambiguous" labels via radio buttons. Unannotated items default visually to "Ambiguous".
+*   **Annotation:** Assign "True", "False", or "Ambiguous" labels via radio buttons.
+*   **Dynamic Defaults:** For images not yet annotated (`human_annotation` is `null`):
+    *   Defaults to "True" if the image has 3 or more MLLM votes.
+    *   Defaults to "Ambiguous" if the image has exactly 2 MLLM votes.
+    *   Defaults to "False" if the image has 1 or 0 MLLM votes.
 *   **State Management:** Uses Streamlit's session state to maintain user selections and current view across interactions.
 *   **Saving:** Saves updated human annotations back to the original JSON file.
 *   **Error Handling:** Basic checks for file existence and JSON format validity.
@@ -129,7 +133,7 @@ The application expects a JSON file with the following structure:
 *   **Annotation Area:**
     *   Displays the selected caption.
     *   Applies MLLM name and vote count filters to the image list.
-    *   Handles pagination logic and displays page navigation buttons.
+    *   See the MLLM votes listed below the image. Note the default selection based on vote count if the image hasn't been annotated before.
     *   Iterates through the images for the current page, displaying the image, path, votes, and the radio button annotation widget.
     *   Collects annotations made on the current page into `current_annotations`.
 *   **Save Button Logic:** When clicked, iterates through `current_annotations`, finds the corresponding image in the main data structure (using `img_path` for robustness), updates its `human_annotation` if changed, and calls `save_data()`.
@@ -138,7 +142,7 @@ The application expects a JSON file with the following structure:
 ## Customization
 
 *   **Data Source:** Modify `load_data()` and `save_data()` if your annotations are stored differently (e.g., CSV, database).
-*   **Annotation Options:** Change the `ANNOTATION_OPTIONS` list and potentially `DEFAULT_ANNOTATION` if you need different labels.
+*   **Annotation Options:** Change the `ANNOTATION_OPTIONS` list. Modify the dynamic default logic in the annotation area if needed.
 *   **Layout:** Adjust Streamlit columns (`st.columns`), image widths (`st.image(width=...)`), and other UI elements.
 *   **Filtering:** Add more complex filtering logic based on other image metadata if available in your JSON.
 *   **Image Loading:** Enhance error handling or add support for images loaded from URLs.

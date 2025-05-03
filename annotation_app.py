@@ -8,27 +8,30 @@ import math
 st.set_page_config(layout="wide") # Use wide layout for more space
 
 # --- Configuration ---
-JSON_FILE_PATH = 'annotations_input.json'
+ANNOTATIONS_DIR = 'annotations' # Directory where user annotation files are stored
 IMAGES_PER_PAGE = 10  # Number of images to display per page
 ANNOTATION_OPTIONS = ["True", "False", "Ambiguous"]
-DEFAULT_ANNOTATION = "Ambiguous" # As requested, default to True
+IMAGES_PER_ROW = 3 # Number of images to display side-by-side
+# DEFAULT_ANNOTATION constant is removed as it's now dynamic
+
 
 # --- Helper Functions ---
 
 @st.cache_data # Cache the data loading to avoid reloading on every interaction
 def load_data(json_path):
-    """Loads the annotation data from the JSON file."""
+    """Loads the annotation data from the specified JSON file.
+    Returns an empty dictionary if the file doesn't exist (shouldn't happen if selected).
+    """
     try:
         with open(json_path, 'r') as f:
             data = json.load(f)
         # Initialize human_annotation if it doesn't exist
         for caption, images in data.items():
             for img_info in images:
-                if "human_annotation" not in img_info:
-                    img_info["human_annotation"] = None # Start with None, will default display to True later
+                # Ensure the key exists, default to None if missing within the file
+                img_info.setdefault("human_annotation", None)
         return data
     except FileNotFoundError:
-        st.error(f"Error: JSON file not found at {json_path}")
         return None
     except json.JSONDecodeError:
         st.error(f"Error: Could not decode JSON from {json_path}. Check its format.")
@@ -48,19 +51,21 @@ def get_all_mllm_voters(data):
     return sorted(list(voters))
 
 def save_data(json_path, data):
-    """Saves the updated annotation data back to the JSON file."""
+    """Saves the updated annotation data back to the specified JSON file."""
     try:
-        # Make a copy before saving to avoid modifying the cached version directly
-        data_to_save = data.copy()
         with open(json_path, 'w') as f:
-            json.dump(data_to_save, f, indent=2) # Use indent for readability
+            # Save the provided data structure directly
+            json.dump(data, f, indent=2) # Use the 'data' argument passed to the function
         st.success(f"Annotations successfully saved to {json_path}!")
     except Exception as e:
         st.error(f"Error saving data to {json_path}: {e}")
 
 # --- Initialize Session State ---
 if 'annotation_data' not in st.session_state:
-    st.session_state.annotation_data = load_data(JSON_FILE_PATH)
+    st.session_state.annotation_data = None # Will be loaded based on file selection
+
+if 'selected_annotation_file' not in st.session_state:
+    st.session_state.selected_annotation_file = None
 
 if 'selected_caption' not in st.session_state:
     st.session_state.selected_caption = None
@@ -78,9 +83,50 @@ if 'selected_vote_counts' not in st.session_state:
 # st.set_page_config(layout="wide") # Use wide layout for more space
 st.title("MLLM Annotation Verification Tool")
 
+# --- Annotation File Selection ---
+st.sidebar.subheader("0. Select Annotation File")
+
+available_files = []
+if os.path.isdir(ANNOTATIONS_DIR):
+    try:
+        # List files in the annotations directory
+        files = [f for f in os.listdir(ANNOTATIONS_DIR) if f.endswith('.json') and os.path.isfile(os.path.join(ANNOTATIONS_DIR, f))]
+        available_files = [os.path.join(ANNOTATIONS_DIR, f) for f in files] # Store full paths
+    except OSError as e:
+        st.sidebar.error(f"Error reading directory {ANNOTATIONS_DIR}: {e}")
+else:
+    st.sidebar.warning(f"Annotations directory '{ANNOTATIONS_DIR}' not found. Please create it.")
+
+# Add a placeholder option
+display_options = ["-- Select a file --"] + available_files
+
+selected_file_sidebar = st.sidebar.selectbox(
+    "Choose your annotation file:",
+    options=display_options,
+    index=0, # Default to placeholder
+    key="file_selector"
+)
+
+# Load data if a valid file is selected and it's different from the current one
+if selected_file_sidebar != "-- Select a file --" and selected_file_sidebar != st.session_state.selected_annotation_file:
+    st.session_state.selected_annotation_file = selected_file_sidebar
+    st.session_state.annotation_data = load_data(st.session_state.selected_annotation_file)
+    # Reset other states when file changes
+    st.session_state.selected_caption = None
+    st.session_state.current_page = 1
+    st.session_state.selected_mllms = []
+    st.session_state.selected_vote_counts = []
+    st.rerun()
+elif selected_file_sidebar == "-- Select a file --" and st.session_state.selected_annotation_file is not None:
+    # Clear data if selection goes back to placeholder
+    st.session_state.selected_annotation_file = None
+    st.session_state.annotation_data = None
+    st.rerun()
+
 # Ensure data is loaded
 if st.session_state.annotation_data is None:
-    st.stop() # Stop execution if data loading failed
+    st.warning("Please select your annotation file from the sidebar to begin.")
+    st.stop() # Stop execution if no file is loaded
 
 # --- Sidebar for Caption Selection ---
 # st.sidebar.header("Select Caption")
@@ -222,58 +268,71 @@ if st.session_state.selected_caption:
     # Keep track of changes made on the current page view
     current_annotations = {}
 
-    for i, img_info in enumerate(images_to_display):
-        img_path = img_info.get("img_path", "N/A")
-        votes = img_info.get("votes", [])
-        # Use the existing human annotation if available, otherwise default
-        # The actual default radio selection happens below using the 'index' parameter
-        current_annotation = img_info.get("human_annotation")
+    # Iterate through images in chunks for grid layout
+    for i in range(0, len(images_to_display), IMAGES_PER_ROW):
+        # Create columns for the current row
+        cols = st.columns(IMAGES_PER_ROW)
+        # Get the images for the current row
+        row_images = images_to_display[i:i + IMAGES_PER_ROW]
 
-        # Determine the index for the radio button based on the current annotation
-        # Default to "True" if no human annotation exists yet
-        default_display_value = current_annotation if current_annotation is not None else DEFAULT_ANNOTATION
-        try:
-            default_index = ANNOTATION_OPTIONS.index(default_display_value)
-        except ValueError:
-            default_index = ANNOTATION_OPTIONS.index(DEFAULT_ANNOTATION) # Fallback if value is somehow invalid
+        # Process each image in the row
+        for j, img_info in enumerate(row_images):
+            # Calculate the actual index relative to the full page list
+            page_relative_index = i + j
+            # Get the column for the current image
+            with cols[j]:
+                img_path = img_info.get("img_path", "N/A")
+                votes = img_info.get("votes", [])
+                current_annotation = img_info.get("human_annotation")
 
-        # Use columns for better layout per image
-        col_img, col_info = st.columns([1, 2])
+                # Determine the default display value dynamically if no annotation exists
+                if current_annotation is not None:
+                    default_display_value = current_annotation
+                else:
+                    # Apply dynamic default rules based on vote count
+                    num_votes = len(votes)
+                    if num_votes >= 3:
+                        default_display_value = "True"
+                    elif num_votes == 2:
+                        default_display_value = "Ambiguous"
+                    else: # 0 or 1 vote
+                        default_display_value = "False"
 
-        with col_img:
-            if os.path.exists(img_path):
+                # Determine the index for the radio button based on the calculated default
                 try:
-                    # Display image with controlled width
-                    image = Image.open(img_path)
-                    st.image(image, width=300, caption=f"Index: {start_idx + i}") # Smaller width
-                except Exception as e:
-                    st.warning(f"Could not load image: {img_path}. Error: {e}")
-            else:
-                st.warning(f"Image not found at path: {img_path}")
+                    default_index = ANNOTATION_OPTIONS.index(default_display_value)
+                except ValueError:
+                    default_index = 0 # Fallback to the first option ("True") if something unexpected happens
 
-        with col_info:
-            st.markdown(f"**Image Path:** `{img_path}`")
-            st.markdown(f"**MLLM Votes:** `{', '.join(votes) if votes else 'None'}`")
+                # Display Image
+                if os.path.exists(img_path):
+                    try:
+                        image = Image.open(img_path)
+                        # Use a fixed width, height will adjust. Adjust width as needed.
+                        st.image(image, width=250, caption=f"Index: {start_idx + page_relative_index}")
+                    except Exception as e:
+                        st.warning(f"Could not load image: {img_path}. Error: {e}")
+                else:
+                    st.warning(f"Image not found at path: {img_path}")
 
-            # Generate a unique key for each radio button based on image path and caption
-            # This ensures widget state is preserved correctly by Streamlit
-            radio_key = f"radio_{caption}_{img_path}_{start_idx + i}"
+                # Display Info
+                st.markdown(f"**Path:** `{os.path.basename(img_path)}`") # Show only filename for brevity
+                st.markdown(f"**Votes:** `{', '.join(votes) if votes else 'None'}`")
 
-            # Use st.radio for annotation selection
-            selected_choice = st.radio(
-                "Your Annotation:",
-                options=ANNOTATION_OPTIONS,
-                index=default_index, # Set default based on current/default annotation
-                key=radio_key,
-                horizontal=True # Display options horizontally
-            )
+                # Annotation Radio Buttons
+                radio_key = f"radio_{caption}_{img_path}_{start_idx + page_relative_index}"
+                selected_choice = st.radio(
+                    "Annotation:",
+                    options=ANNOTATION_OPTIONS,
+                    index=default_index,
+                    key=radio_key,
+                    horizontal=True
+                )
 
-            # Store the selected choice to update the main data structure later
-            # We store the index *relative to the currently displayed page*
-            # and the image path for robust saving later.
-            page_relative_index = i
-            current_annotations[page_relative_index] = selected_choice
-            # current_annotations[original_list_index] = selected_choice
+                # Store the annotation choice
+                current_annotations[page_relative_index] = selected_choice
+
+        # Add a separator after each row of images
 
 
         st.markdown("---") # Separator between images
@@ -285,11 +344,11 @@ if st.session_state.selected_caption:
         updated_count = 0
         # Iterate through the annotations made on the *current page*
         for page_relative_index, annotation_value in current_annotations.items():
-             # Get the actual image info dictionary from the displayed list
-             img_info_displayed = images_to_display[page_relative_index]
-             img_path_to_update = img_info_displayed.get("img_path")
-
-             if not img_path_to_update:
+             # Ensure the index is valid for the images displayed on this page
+             if page_relative_index < len(images_to_display):
+                 img_info_displayed = images_to_display[page_relative_index]
+                 img_path_to_update = img_info_displayed.get("img_path")
+             else:  # Should not happen, but safety check
                  st.sidebar.warning(f"Skipping update for an image with no path (Index {page_relative_index} on page).")
                  continue
 
@@ -304,7 +363,7 @@ if st.session_state.selected_caption:
         if updated_count > 0:
             st.sidebar.info(f"Updating {updated_count} annotations for caption '{caption}'...")
             # Save the entire data structure back to the file
-            save_data(JSON_FILE_PATH, st.session_state.annotation_data)
+            save_data(st.session_state.selected_annotation_file, st.session_state.annotation_data)
             # Optionally clear cache if you want the next load to reflect saved file directly
             # However, session_state holds the current truth, so cache clearing might not be strictly needed
             # st.cache_data.clear()
@@ -314,7 +373,7 @@ if st.session_state.selected_caption:
 
 
 else:
-    st.info("Please select a caption from the sidebar to start annotating.")
+    st.info("Please select a caption from the sidebar to start annotating (after selecting a file).")
 
 
 # --- Display Raw Data (Optional for Debugging) ---

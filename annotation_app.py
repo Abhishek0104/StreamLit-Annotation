@@ -78,6 +78,10 @@ if 'selected_mllms' not in st.session_state:
 
 if 'selected_vote_counts' not in st.session_state:
     st.session_state.selected_vote_counts = [] # Initialize empty list for vote count filter
+    
+if 'score_sort_order' not in st.session_state:
+    st.session_state.score_sort_order = "None" # Options: "None", "Ascending", "Descending"
+
 
 # --- Main App Logic ---
 # st.set_page_config(layout="wide") # Use wide layout for more space
@@ -116,11 +120,13 @@ if selected_file_sidebar != "-- Select a file --" and selected_file_sidebar != s
     st.session_state.current_page = 1
     st.session_state.selected_mllms = []
     st.session_state.selected_vote_counts = []
+    st.session_state.score_sort_order = "None" # Reset score sort order
     st.rerun()
 elif selected_file_sidebar == "-- Select a file --" and st.session_state.selected_annotation_file is not None:
     # Clear data if selection goes back to placeholder
     st.session_state.selected_annotation_file = None
     st.session_state.annotation_data = None
+    st.session_state.selected_caption = None
     st.rerun()
 
 # Ensure data is loaded
@@ -194,6 +200,28 @@ else:
     st.session_state.selected_vote_counts = []
 
 
+# --- Score Sort Filter ---
+st.sidebar.subheader("4. Sort by Score")
+score_sort_options = ["None", "Ascending", "Descending"]
+
+# Determine the current index for the selectbox
+try:
+    current_score_sort_index = score_sort_options.index(st.session_state.score_sort_order)
+except ValueError:
+    current_score_sort_index = 0 # Default to "None" if state is somehow invalid
+
+selected_score_sort_order_sidebar = st.sidebar.selectbox(
+    "Sort images by score:",
+    options=score_sort_options,
+    index=current_score_sort_index,
+    key="score_sort_selector"
+)
+if selected_score_sort_order_sidebar != st.session_state.score_sort_order:
+    st.session_state.score_sort_order = selected_score_sort_order_sidebar
+    st.session_state.current_page = 1 # Reset page when sort order changes
+    st.rerun()
+
+
 # --- Annotation Area ---
 if st.session_state.selected_caption:
     caption = st.session_state.selected_caption
@@ -228,6 +256,19 @@ if st.session_state.selected_caption:
         st.info(f"Filtering images with vote counts: {', '.join(map(str, vote_count_filter))}")
     else:
         filtered_images = images_after_mllm_filter # Pass all if no vote count filter    
+
+    # --- Apply Score Sorting ---
+    if st.session_state.score_sort_order and st.session_state.score_sort_order != "None":
+        is_descending = st.session_state.score_sort_order == "Descending"
+        try:
+            # Sort images by score. Assumes 'score' is numeric or can be converted.
+            # .get('score', 0.0) provides a default if 'score' key is missing (though load_data should prevent this)
+            # and float() conversion handles scores stored as strings.
+            filtered_images.sort(key=lambda img: float(img.get('score', 0.0)), reverse=is_descending)
+            st.info(f"Sorting images by score ({st.session_state.score_sort_order}).")
+        except (TypeError, ValueError) as e:
+            st.warning(f"Could not sort by score. Ensure scores are numeric. Error: {e}")
+            # If sorting fails, proceed with the list as it is (after other filters)
 
     total_images = len(filtered_images)
     total_pages = math.ceil(total_images / IMAGES_PER_PAGE)
@@ -284,6 +325,8 @@ if st.session_state.selected_caption:
                 img_path = img_info.get("img_path", "N/A")
                 votes = img_info.get("votes", [])
                 current_annotation = img_info.get("human_annotation")
+                score = img_info.get("score", 0.0) # Get score, defaults to 0.0 if not set by load_data
+
 
                 # Determine the default display value dynamically if no annotation exists
                 if current_annotation is not None:
@@ -309,7 +352,7 @@ if st.session_state.selected_caption:
                     try:
                         image = Image.open(img_path)
                         # Use a fixed width, height will adjust. Adjust width as needed.
-                        st.image(image, width=250, caption=f"Index: {start_idx + page_relative_index}")
+                        st.image(image, width=250, caption=f"Index: {start_idx + page_relative_index} | Score: {score:.2f}")
                     except Exception as e:
                         st.warning(f"Could not load image: {img_path}. Error: {e}")
                 else:
@@ -341,45 +384,36 @@ if st.session_state.selected_caption:
     st.sidebar.markdown("---") # Add separator in sidebar
     if st.sidebar.button("💾 Update & Save Annotations", key="save_button"):
         # Apply the changes made on the current page to the session state data
-        actual_updates_made = 0
+        updated_count = 0
         # Iterate through the annotations made on the *current page*
-        # current_annotations maps page_relative_index (for images_to_display) to new_annotation_value
-        for page_relative_index, new_annotation_value in current_annotations.items():
+        for page_relative_index, annotation_value in current_annotations.items():
              # Ensure the index is valid for the images displayed on this page
              if page_relative_index < len(images_to_display):
-                 # img_info_displayed is the specific image object from the current page's display list
                  img_info_displayed = images_to_display[page_relative_index]
                  img_path_to_update = img_info_displayed.get("img_path")
-
-                 if not img_path_to_update:
-                     st.sidebar.warning(f"Skipping update for an image with no path (Index {page_relative_index} on page).")
-                     continue
-             else:  # Should not happen if current_annotations is built correctly from images_to_display
-                 st.sidebar.warning(f"Invalid index {page_relative_index} encountered during save. Skipping this entry.")
+             else:  # Should not happen, but safety check
+                 st.sidebar.warning(f"Skipping update for an image with no path (Index {page_relative_index} on page).")
                  continue
 
              # Find the *original* image dictionary in the main session state data using its path
-             # This ensures we are updating the canonical data source: st.session_state.annotation_data
-             caption_data_list = st.session_state.annotation_data[caption]
-             found_in_session_state = False
-             for original_img_info in caption_data_list:
+             original_data_list = st.session_state.annotation_data[caption]
+             for original_img_info in original_data_list:
                  if original_img_info.get("img_path") == img_path_to_update:
-                     found_in_session_state = True
-                     # Check if the annotation actually changed before updating and incrementing counter
-                     if original_img_info.get("human_annotation") != new_annotation_value:
-                         original_img_info["human_annotation"] = new_annotation_value
-                         actual_updates_made += 1
-                     break # Found the image, processed it, can break from inner loop searching for this img_path
-            
-             if not found_in_session_state:
-                 st.sidebar.error(f"Consistency Error: Image path {img_path_to_update} from current page not found in session state for caption '{caption}'. This should not happen.")
+                     if original_img_info.get("human_annotation") != annotation_value:
+                         original_img_info["human_annotation"] = annotation_value
+                 updated_count += 1
 
-        if actual_updates_made > 0:
-            st.sidebar.info(f"Updated {actual_updates_made} annotation(s) for caption '{caption}'.")
+        if updated_count > 0:
+            st.session_state.annotation_data[caption] = original_data_list
+            st.sidebar.info(f"Updating {updated_count} annotations for caption '{caption}'...")
             # Save the entire data structure back to the file
             save_data(st.session_state.selected_annotation_file, st.session_state.annotation_data)
+            # Optionally clear cache if you want the next load to reflect saved file directly
+            # However, session_state holds the current truth, so cache clearing might not be strictly needed
+            st.cache_data.clear()
+            st.rerun() # Force a rerun to potentially show confirmation/clear state
         else:
-            st.sidebar.warning("No actual changes to annotations detected on this page to save.")
+            st.sidebar.warning("No changes detected on this page to save.")
 
 
 else:
